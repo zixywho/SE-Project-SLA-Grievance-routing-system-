@@ -33,11 +33,36 @@ app.use("/api/v1/reports", reportRouter);
 app.use("/api/v1/notifications", notificationRouter);
 app.use("/api/v1/masters", masterRouter);
 
+// 404 for unknown routes
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Route not found: ${req.method} ${req.originalUrl}` });
+});
+
+// Global error handler (turns ApiError and Mongoose errors into clean JSON)
 app.use((err, req, res, next) => {
-  res.status(err.statusCode || 500).json({
+  let status = err.statusCode || 500;
+  let message = err.message || "Internal Server Error";
+
+  if (err.name === "ValidationError") status = 400;
+  if (err.name === "CastError") {
+    status = 400;
+    message = `Invalid value for ${err.path}`;
+  }
+  if (err.code === 11000) {
+    status = 409;
+    message = "Duplicate value: " + Object.keys(err.keyValue || {}).join(", ");
+  }
+  if (err.type === "entity.parse.failed") {
+    status = 400;
+    message = "Invalid JSON in request body";
+  }
+  if (status === 500) console.error(err);
+
+  res.status(status).json({
     success: false,
-    message: err.message || "Internal Server Error",
-    errors: err.errors || [],
+    message,
+    errors: Array.isArray(err.errors) ? err.errors : [],
   });
 });
+
 export { app };

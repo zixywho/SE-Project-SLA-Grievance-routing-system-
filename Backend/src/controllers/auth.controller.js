@@ -12,7 +12,9 @@ const cookieOptions = {
 // POST /api/v1/auth/register  (public, citizens only)
 const registerCitizen = asyncHandler(async (req, res) => {
   // TODO 1: read name, email, mobile, password from req.body
+  const {name,email,mobile,password} = req.body;
   // TODO 2: validate: all required fields present, email format, password min length (6+)
+  if (name == "" || !name || "" == name.trim() || !password || password.length() < 6)
   // TODO 3: check if a user with this email already exists -> ApiError(409)
   // TODO 4: User.create({ name, email, mobile, password, role: "citizen" })
   //         IMPORTANT: force role = "citizen". NEVER take role from req.body.
