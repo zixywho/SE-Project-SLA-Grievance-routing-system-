@@ -2,53 +2,73 @@ import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { str } from "../utils/grievanceHelpers.js";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
+  maxAge: 24 * 60 * 60 * 1000,
 };
 
 // POST /api/v1/auth/register  (public, citizens only)
 const registerCitizen = asyncHandler(async (req, res) => {
-  // TODO 1: read name, email, mobile, password from req.body
-  const {name,email,mobile,password} = req.body;
-  // TODO 2: validate: all required fields present, email format, password min length (6+)
-  if (name == "" || !name || "" == name.trim() || !password || password.length() < 6)
-  // TODO 3: check if a user with this email already exists -> ApiError(409)
-  // TODO 4: User.create({ name, email, mobile, password, role: "citizen" })
-  //         IMPORTANT: force role = "citizen". NEVER take role from req.body.
-  // TODO 5: fetch the created user without the password field
-  // TODO 6: return ApiResponse(201, user, "Registered successfully")
-  throw new ApiError(501, "registerCitizen not implemented yet");
+  const body = req.body ?? {};
+  const name = str(body.name);
+  const email = str(body.email).toLowerCase();
+  const mobile = str(body.mobile);
+  const password = str(body.password);
+
+  if (!name || !email || !password) throw new ApiError(400, "name, email and password are required");
+  if (!EMAIL_RE.test(email)) throw new ApiError(400, "Invalid email address");
+  if (password.length < 6) throw new ApiError(400, "Password must be at least 6 characters");
+  if (mobile && !/^\d{10}$/.test(mobile)) throw new ApiError(400, "Mobile number must be 10 digits");
+
+  if (await User.findOne({ email })) throw new ApiError(409, "An account with this email already exists");
+
+  // role is ALWAYS citizen here, never taken from the request
+  const user = await User.create({ name, email, mobile: mobile || undefined, password, role: "citizen" });
+  const created = await User.findById(user._id); // password is select:false, so it is excluded
+
+  return res.status(201).json(new ApiResponse(201, created, "Registered successfully"));
 });
 
 // POST /api/v1/auth/login  (public, all roles)
 const loginUser = asyncHandler(async (req, res) => {
-  // TODO 1: read email and password from req.body, 400 if missing
-  // TODO 2: User.findOne({ email }).select("+password")  (password has select:false)
-  // TODO 3: if no user or !isActive -> ApiError(401, "Invalid credentials")
-  // TODO 4: user.isPasswordCorrect(password) -> if false, ApiError(401, "Invalid credentials")
-  //         (same message for both cases, do not reveal which one failed)
-  // TODO 5: const token = user.generateAccessToken()
-  // TODO 6: res.cookie("accessToken", token, cookieOptions)
-  // TODO 7: return user data WITHOUT password + token (so Postman / frontend can use either)
-  throw new ApiError(501, "loginUser not implemented yet");
+  const body = req.body ?? {};
+  const email = str(body.email).toLowerCase();
+  const password = str(body.password);
+  if (!email || !password) throw new ApiError(400, "email and password are required");
+
+  const user = await User.findOne({ email }).select("+password");
+  // same message for "no user" and "wrong password" on purpose
+  if (!user || !user.isActive || !(await user.isPasswordCorrect(password))) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  const accessToken = user.generateAccessToken();
+  const safeUser = await User.findById(user._id).populate("department", "name code");
+
+  return res
+    .status(200)
+    .cookie("accessToken", accessToken, cookieOptions)
+    .json(new ApiResponse(200, { user: safeUser, accessToken }, "Login successful"));
 });
 
-// POST /api/v1/auth/logout  (needs login)
+// POST /api/v1/auth/logout
 const logoutUser = asyncHandler(async (req, res) => {
-  // TODO 1: res.clearCookie("accessToken", cookieOptions)
-  // TODO 2: return ApiResponse(200, {}, "Logged out")
-  throw new ApiError(501, "logoutUser not implemented yet");
+  return res
+    .status(200)
+    .clearCookie("accessToken", { httpOnly: true, sameSite: "lax", secure: cookieOptions.secure })
+    .json(new ApiResponse(200, {}, "Logged out"));
 });
 
-// GET /api/v1/auth/me  (needs login)
+// GET /api/v1/auth/me
 const getCurrentUser = asyncHandler(async (req, res) => {
-  // TODO 1: req.user is already set by verifyJWT
-  // TODO 2: populate department if the user has one
-  // TODO 3: return ApiResponse(200, req.user)
-  throw new ApiError(501, "getCurrentUser not implemented yet");
+  const user = await User.findById(req.user._id).populate("department", "name code");
+  return res.status(200).json(new ApiResponse(200, user));
 });
 
 export { registerCitizen, loginUser, logoutUser, getCurrentUser };
